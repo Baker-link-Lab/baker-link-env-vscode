@@ -1,7 +1,7 @@
 {
     "name": "baker-link-env",
     "displayName": "Baker Link Env",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "publisher": "baker-link-lab",
     "description": "Embedded debugging and Dev Container integration for Baker Link Env, powered by probe-rs.",
     "author": {
@@ -88,7 +88,7 @@
     ],
     "activationEvents": [
         "onDebug",
-        "workspaceContains:.bakerlink/connection.json"
+        "workspaceContains:.vscode/launch.json"
     ],
     "capabilities": {
         "untrustedWorkspaces": {
@@ -149,6 +149,16 @@
                                     "elf": {
                                         "type": "string",
                                         "description": "Container-side ELF file to upload after preLaunchTask completes. Requires one bakerlink://project/profile programBinary. Supports VS Code variables."
+                                    },
+                                    "dapServer": {
+                                        "type": "string",
+                                        "default": "host.docker.internal:50001",
+                                        "description": "Host DAP endpoint for this configuration. Overrides server. Use a literal host:port for connection diagnostics."
+                                    },
+                                    "uploadUrl": {
+                                        "type": "string",
+                                        "default": "http://host.docker.internal:50002",
+                                        "description": "ELF upload HTTP(S) origin for this configuration. Use a literal origin for connection diagnostics."
                                     }
                                 }
                             },
@@ -726,7 +736,7 @@
                     "bakerLink.dapServer": {
                         "type": "string",
                         "default": "host.docker.internal:50001",
-                        "description": "Legacy launch.json substitution. Baker Link artifact sessions use .bakerlink/connection.json as the source of truth.",
+                        "description": "Legacy launch.json substitution. New projects configure bakerLink.dapServer inside launch.json.",
                         "scope": "resource"
                     }
                 }

@@ -3,13 +3,12 @@ import {promises as fs} from 'node:fs';
 import * as http from 'node:http';
 import * as https from 'node:https';
 import {createConnection, isIP} from 'node:net';
-import * as path from 'node:path';
 
 export const MAX_ARTIFACT_SIZE = 128 * 1024 * 1024;
-export const CONNECTION_FILE = '.bakerlink/connection.json';
+export const DEFAULT_DAP_SERVER = 'host.docker.internal:50001';
+export const DEFAULT_UPLOAD_URL = 'http://host.docker.internal:50002';
 
 export interface BakerLinkConnection {
-    version: 1;
     dapServer: string;
     uploadUrl: string;
 }
@@ -59,24 +58,37 @@ export function parseUploadUrl(value: string): URL {
 export function parseConnection(value: unknown): BakerLinkConnection {
     if (
         !isRecord(value) ||
-        value.version !== 1 ||
         typeof value.dapServer !== 'string' ||
         typeof value.uploadUrl !== 'string'
     ) {
-        throw new Error('Expected connection version 1 with dapServer and uploadUrl strings.');
+        throw new Error('Expected dapServer and uploadUrl strings in the launch configuration.');
     }
     parseDapAddress(value.dapServer);
     parseUploadUrl(value.uploadUrl);
-    return {version: 1, dapServer: value.dapServer, uploadUrl: value.uploadUrl};
+    return {dapServer: value.dapServer, uploadUrl: value.uploadUrl};
 }
 
-export async function readConnection(workspace: string): Promise<BakerLinkConnection> {
-    const file = path.join(workspace, CONNECTION_FILE);
-    try {
-        return parseConnection(JSON.parse(await fs.readFile(file, 'utf8')));
-    } catch (error) {
-        throw new Error(`Cannot read ${file}: ${errorMessage(error)}`);
+export function connectionFromLaunch(config: Record<string, unknown>): BakerLinkConnection {
+    if (config.bakerLink !== undefined && !isRecord(config.bakerLink)) {
+        throw new Error('bakerLink must be an object in launch.json.');
     }
+    const options = config.bakerLink ?? {};
+    const dapServer =
+        options.dapServer !== undefined
+            ? options.dapServer
+            : config.server !== undefined
+              ? config.server
+              : DEFAULT_DAP_SERVER;
+    const uploadUrl = options.uploadUrl !== undefined ? options.uploadUrl : DEFAULT_UPLOAD_URL;
+    if (
+        (typeof dapServer === 'string' && dapServer.includes('${')) ||
+        (typeof uploadUrl === 'string' && uploadUrl.includes('${'))
+    ) {
+        throw new Error(
+            'Resolve endpoint variables or use literal endpoints for connection checks.',
+        );
+    }
+    return parseConnection({dapServer, uploadUrl});
 }
 
 export function parseArtifactIdentifier(value: string): ArtifactIdentifier {

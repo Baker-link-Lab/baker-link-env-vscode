@@ -1,12 +1,11 @@
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import {
-    CONNECTION_FILE,
     checkConnection,
+    connectionFromLaunch,
     errorMessage,
     isRecord,
     parseArtifactIdentifier,
-    readConnection,
     uploadElf,
 } from './bakerLink';
 
@@ -33,7 +32,7 @@ export class BakerLinkIntegration {
     constructor(context: Pick<vscode.ExtensionContext, 'subscriptions'>) {
         this.status.command = 'bakerLink.checkConnection';
         this.resetStatus();
-        const watcher = vscode.workspace.createFileSystemWatcher(`**/${CONNECTION_FILE}`);
+        const watcher = vscode.workspace.createFileSystemWatcher('**/.vscode/launch.json');
         context.subscriptions.push(
             this.output,
             this.status,
@@ -41,10 +40,19 @@ export class BakerLinkIntegration {
             watcher.onDidChange(() => this.resetStatus()),
             watcher.onDidCreate(() => this.resetStatus()),
             watcher.onDidDelete(() => this.resetStatus()),
+            vscode.workspace.onDidChangeConfiguration((event) => {
+                if (event.affectsConfiguration('launch')) {
+                    this.resetStatus();
+                }
+            }),
             vscode.workspace.onDidChangeWorkspaceFolders(() => this.resetStatus()),
             vscode.commands.registerCommand('bakerLink.checkConnection', () =>
                 this.runCommand(async (folder) => {
-                    const connection = await readConnection(folder.uri.fsPath);
+                    const config = await this.pickConfiguration(folder);
+                    if (!config) {
+                        return;
+                    }
+                    const connection = connectionFromLaunch(config);
                     await vscode.window.withProgress(
                         {
                             location: vscode.ProgressLocation.Notification,
@@ -64,9 +72,9 @@ export class BakerLinkIntegration {
                         },
                     );
                     this.status.text = '$(plug) Baker Link: Ports reachable';
-                    this.status.tooltip = `${folder.name}: DAP and ELF upload TCP ports reachable. This does not verify host identity or USB probe readiness.`;
+                    this.status.tooltip = `${folder.name} / ${config.name}: DAP and ELF upload TCP ports reachable. This does not verify host identity or USB probe readiness.`;
                     this.output.appendLine(
-                        `${folder.name}: ${connection.dapServer} and ${connection.uploadUrl} reachable.`,
+                        `${folder.name} / ${config.name}: ${connection.dapServer} and ${connection.uploadUrl} reachable.`,
                     );
                     await vscode.window.showInformationMessage(
                         'Baker Link: DAP and ELF upload ports are reachable (USB probe not checked).',
@@ -76,12 +84,37 @@ export class BakerLinkIntegration {
             vscode.commands.registerCommand('bakerLink.openConnection', () =>
                 this.runCommand(async (folder) => {
                     const document = await vscode.workspace.openTextDocument(
-                        vscode.Uri.joinPath(folder.uri, CONNECTION_FILE),
+                        vscode.Uri.joinPath(folder.uri, '.vscode/launch.json'),
                     );
                     await vscode.window.showTextDocument(document);
                 }),
             ),
         );
+    }
+
+    private async pickConfiguration(folder: vscode.WorkspaceFolder) {
+        const configurations: unknown = vscode.workspace
+            .getConfiguration('launch', folder.uri)
+            .get('configurations');
+        const candidates = Array.isArray(configurations)
+            ? configurations.filter(
+                  (config: unknown): config is Record<string, unknown> =>
+                      isRecord(config) &&
+                      config.type === DEBUG_TYPE &&
+                      typeof config.name === 'string',
+              )
+            : [];
+        if (candidates.length === 0) {
+            throw new Error('Add a Baker Link debug configuration to .vscode/launch.json first.');
+        }
+        if (candidates.length === 1) {
+            return candidates[0];
+        }
+        const selected = await vscode.window.showQuickPick(
+            candidates.map((config) => ({label: String(config.name), config})),
+            {placeHolder: 'Select the Baker Link debug configuration to check'},
+        );
+        return selected?.config;
     }
 
     private resetStatus() {
@@ -160,7 +193,7 @@ export class BakerLinkIntegration {
                 'bakerLink.elf requires a launch session with exactly one artifact URI.',
             );
         }
-        const connection = await readConnection(folder.uri.fsPath);
+        const connection = connectionFromLaunch(config);
         config.server = connection.dapServer;
         config.remoteServerMode = false;
     }
@@ -170,7 +203,7 @@ export class BakerLinkIntegration {
         if (!folder || !isRecord(config.bakerLink) || typeof config.bakerLink.elf !== 'string') {
             return;
         }
-        const connection = await readConnection(folder.uri.fsPath);
+        const connection = connectionFromLaunch(config);
         const artifact = parseArtifactIdentifier(artifactBinaries(config)[0]);
         const elf = path.resolve(folder.uri.fsPath, config.bakerLink.elf);
         if (elf.includes('${')) {

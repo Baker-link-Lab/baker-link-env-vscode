@@ -19,8 +19,17 @@ export const StatusBarAlignment = {Left: 1};
 export const ProgressLocation = {Notification: 15};
 export const workspace = {
     isTrusted: true,
-    workspaceFolders: [],
+    workspaceFolders: [] as vscode.WorkspaceFolder[],
+    configurations: new Map<string, unknown[]>(),
+    getConfiguration: (_: string, uri: {fsPath: string}) => ({
+        get: () => workspace.configurations.get(uri.fsPath),
+    }),
+    openTextDocument: async (uri: {fsPath: string}) => {
+        documents.push(uri);
+        return uri;
+    },
     onDidChangeWorkspaceFolders: event,
+    onDidChangeConfiguration: event,
     createFileSystemWatcher: () => ({
         dispose() {},
         onDidChange: event,
@@ -28,7 +37,15 @@ export const workspace = {
         onDidDelete: event,
     }),
 };
-export const commands = {registerCommand: () => disposable};
+export const commandHandlers = new Map<string, () => Promise<void>>();
+export const commands = {
+    registerCommand: (name: string, handler: () => Promise<void>) => {
+        commandHandlers.set(name, handler);
+        return disposable;
+    },
+};
+export const messages: string[] = [];
+export const documents: Array<{fsPath: string}> = [];
 export const window = {
     createOutputChannel: () => ({appendLine() {}, dispose() {}}),
     createStatusBarItem: () => ({show() {}, hide() {}, dispose() {}}),
@@ -39,13 +56,18 @@ export const window = {
             token: {isCancellationRequested: boolean; onCancellationRequested: typeof event},
         ) => Promise<void>,
     ) => action({}, {isCancellationRequested: false, onCancellationRequested: event}),
-    showErrorMessage: async () => undefined,
-    showInformationMessage: async () => undefined,
+    showErrorMessage: async (message: string) => messages.push(message),
+    showInformationMessage: async (message: string) => messages.push(message),
+    selectedIndex: 0,
+    showQuickPick: async <T>(items: T[]) => items[window.selectedIndex],
     showWorkspaceFolderPick: async () => undefined,
     openTextDocument: async () => undefined,
     showTextDocument: async () => undefined,
 };
 export const Uri = {
-    joinPath: () => undefined,
+    joinPath: (uri: {fsPath: string}, relative: string) => ({
+        fsPath: `${uri.fsPath}/${relative}`,
+    }),
     file: (fsPath: string) => ({fsPath}),
 };
+import type * as vscode from 'vscode';

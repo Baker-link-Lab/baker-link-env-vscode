@@ -8,20 +8,28 @@ import {test} from 'node:test';
 import * as vscode from 'vscode';
 import {
     MAX_ARTIFACT_SIZE,
+    DEFAULT_DAP_SERVER,
+    DEFAULT_UPLOAD_URL,
     checkConnection,
     checkPort,
     parseArtifactIdentifier,
     parseConnection,
     parseDapAddress,
     parseUploadUrl,
-    readConnection,
+    connectionFromLaunch,
     uploadElf,
 } from '../src/bakerLink';
 import {BakerLinkIntegration, DEBUG_TYPE} from '../src/bakerLinkIntegration';
 import {ProbeRsDebugAdapter} from '../src/remoteServer';
 import type {DapTransport} from '../src/transport';
 import type {DebugProtocol} from '@vscode/debugprotocol';
-import {workspace as mockWorkspace} from './vscode';
+import {
+    workspace as mockWorkspace,
+    window as mockWindow,
+    commandHandlers,
+    messages,
+    documents,
+} from './vscode';
 
 async function serve(handler: (request: IncomingMessage, response: ServerResponse) => void) {
     const server = createServer(handler);
@@ -31,7 +39,6 @@ async function serve(handler: (request: IncomingMessage, response: ServerRespons
     const port = address.port;
     return {
         connection: {
-            version: 1 as const,
             dapServer: `127.0.0.1:${port}`,
             uploadUrl: `http://127.0.0.1:${port}`,
         },
@@ -51,9 +58,8 @@ async function temporaryProject() {
     return {root, elf, close: () => fs.rm(root, {recursive: true})};
 }
 
-test('validates version 1 connection and explicit ports', () => {
+test('validates launch connection endpoints and explicit ports', () => {
     const connection = {
-        version: 1,
         dapServer: 'host.docker.internal:50001',
         uploadUrl: 'http://host.docker.internal:50002',
     };
@@ -61,7 +67,7 @@ test('validates version 1 connection and explicit ports', () => {
     for (const value of [
         null,
         {},
-        {...connection, version: 2},
+        {...connection, uploadUrl: 12},
         {...connection, dapServer: 'host'},
     ]) {
         assert.throws(() => parseConnection(value));
@@ -107,15 +113,31 @@ test('matches host artifact identifier limits and rejects path traversal', () =>
     }
 });
 
-test('reports missing and malformed connection files explicitly', async () => {
-    const project = await temporaryProject();
-    try {
-        await assert.rejects(readConnection(project.root), /connection\.json/);
-        await fs.mkdir(path.join(project.root, '.bakerlink'));
-        await fs.writeFile(path.join(project.root, '.bakerlink/connection.json'), '{');
-        await assert.rejects(readConnection(project.root), /Cannot read/);
-    } finally {
-        await project.close();
+test('uses launch endpoints or built-in defaults without connection files', () => {
+    assert.deepEqual(connectionFromLaunch({bakerLink: {elf: 'firmware.elf'}}), {
+        dapServer: DEFAULT_DAP_SERVER,
+        uploadUrl: DEFAULT_UPLOAD_URL,
+    });
+    assert.deepEqual(
+        connectionFromLaunch({
+            server: 'legacy-host:50001',
+            bakerLink: {dapServer: 'custom-host:60001', uploadUrl: 'https://custom-host:60002'},
+        }),
+        {dapServer: 'custom-host:60001', uploadUrl: 'https://custom-host:60002'},
+    );
+    assert.equal(
+        connectionFromLaunch({server: 'legacy-host:50001'}).dapServer,
+        'legacy-host:50001',
+    );
+    for (const config of [
+        {bakerLink: false},
+        {bakerLink: {dapServer: 12}},
+        {bakerLink: {dapServer: null}},
+        {bakerLink: {uploadUrl: null}},
+        {bakerLink: {uploadUrl: 'file:///tmp'}},
+        {bakerLink: {dapServer: '${env:HOST}:50001'}},
+    ]) {
+        assert.throws(() => connectionFromLaunch(config));
     }
 });
 
@@ -277,14 +299,10 @@ test('configuration does not upload before the build; adapter preparation upload
         name: 'Example',
         server: 'stale-host:1234',
         coreConfigs: [{coreIndex: 0, programBinary: 'bakerlink://example/debug'}],
-        bakerLink: {elf: 'firmware.elf'},
+        bakerLink: {elf: 'firmware.elf', ...server.connection},
     };
     try {
-        await fs.mkdir(path.join(project.root, '.bakerlink'));
-        await fs.writeFile(
-            path.join(project.root, '.bakerlink/connection.json'),
-            JSON.stringify(server.connection),
-        );
+        await assert.rejects(fs.stat(path.join(project.root, '.bakerlink')), /ENOENT/);
         await integration.configure(config, folder);
         assert.equal(uploads, 0);
         assert.equal(config.server, server.connection.dapServer);
@@ -294,7 +312,7 @@ test('configuration does not upload before the build; adapter preparation upload
         await fs.writeFile(project.elf, 'ELF produced by preLaunchTask');
         await integration.prepareDebug(config, folder);
         assert.equal(uploads, 1);
-        assert.deepEqual(config.bakerLink, {elf: 'firmware.elf'});
+        assert.deepEqual(config.bakerLink, {elf: 'firmware.elf', ...server.connection});
         assert.equal(config.coreConfigs[0].programBinary, 'bakerlink://example/debug');
         await integration.prepareDebug(config, folder);
         assert.equal(uploads, 2, 'restarts must upload the newly built ELF again');
@@ -412,4 +430,66 @@ test('rejects untrusted, incompatible, and ambiguous artifact configurations', a
     delete normal.bakerLink;
     await integration.configure(normal, folder);
     assert.equal(normal.server, undefined, 'standard local configurations are unchanged');
+});
+
+test('diagnostics select launch configurations and open launch.json without .bakerlink', async () => {
+    const project = await temporaryProject();
+    const server = await serve((_, response) => response.end());
+    const folder: vscode.WorkspaceFolder = {
+        uri: vscode.Uri.file(project.root),
+        name: 'example',
+        index: 0,
+    };
+    new BakerLinkIntegration({subscriptions: []});
+    mockWorkspace.workspaceFolders = [folder];
+    mockWorkspace.configurations.set(project.root, [
+        {type: 'other-debugger', name: 'Other'},
+        {type: DEBUG_TYPE, name: 'Unavailable', bakerLink: {dapServer: 'invalid'}},
+        {type: DEBUG_TYPE, name: 'Reachable', bakerLink: server.connection},
+    ]);
+    mockWindow.selectedIndex = 1;
+    try {
+        const check = commandHandlers.get('bakerLink.checkConnection');
+        const open = commandHandlers.get('bakerLink.openConnection');
+        assert.ok(check && open);
+        const before = messages.length;
+        await check();
+        assert.match(messages[before], /ports are reachable/);
+        await open();
+        assert.equal(documents.at(-1)?.fsPath, path.join(project.root, '.vscode/launch.json'));
+        await assert.rejects(fs.stat(path.join(project.root, '.bakerlink')), /ENOENT/);
+        mockWorkspace.configurations.set(project.root, []);
+        await check();
+        assert.match(messages.at(-1) ?? '', /Add a Baker Link debug configuration/);
+    } finally {
+        mockWindow.selectedIndex = 0;
+        mockWorkspace.workspaceFolders = [];
+        mockWorkspace.configurations.clear();
+        await server.close();
+        await project.close();
+    }
+});
+
+test('invalid launch endpoints abort preparation without uploading', async () => {
+    const project = await temporaryProject();
+    const integration = new BakerLinkIntegration({subscriptions: []});
+    const folder: vscode.WorkspaceFolder = {
+        uri: vscode.Uri.file(project.root),
+        name: 'example',
+        index: 0,
+    };
+    const config: vscode.DebugConfiguration = {
+        type: DEBUG_TYPE,
+        request: 'launch',
+        name: 'Example',
+        bakerLink: {elf: project.elf, dapServer: 'localhost:0'},
+        coreConfigs: [{programBinary: 'bakerlink://example/debug'}],
+    };
+    try {
+        await assert.rejects(integration.prepareDebug(config, folder), /dapServer/);
+        config.bakerLink = {elf: project.elf, uploadUrl: 'http://localhost/path'};
+        await assert.rejects(integration.prepareDebug(config, folder), /uploadUrl/);
+    } finally {
+        await project.close();
+    }
 });
