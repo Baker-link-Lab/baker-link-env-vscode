@@ -1,37 +1,23 @@
 # Baker Link Env for VS Code
 
-A Baker Link fork of the [probe-rs VS Code extension](https://github.com/probe-rs/vscode),
-based on upstream 0.32.0. This is not the official probe-rs extension.
+Build and debug embedded Rust applications in a Dev Container using
+[Baker Link Env](https://github.com/Baker-link-Lab/baker-link-env) on the host.
+The extension uploads the built ELF before debugging and on restart, then
+connects to the host's probe-rs DAP server.
 
-The extension icon is bundled from `icon/icon.png`, copied from Baker Link Env's
-`icon/icon.png`. It does not depend on files outside this repository.
+This is a fork of the [probe-rs VS Code extension](https://github.com/probe-rs/vscode)
+(upstream 0.32.0), not the official extension.
 
-## Development MVP
+## Installation
 
-- Extension ID: `baker-link-lab.baker-link-env`.
-- Debug type: `baker-link-debug` (does not claim the official `probe-rs-debug` type).
-- Runs in the workspace extension host, inside the Dev Container.
-- Reads and validates per-session connection endpoints in `.vscode/launch.json`.
-- Uploads one ELF with SHA-256 after `preLaunchTask` succeeds, before opening DAP.
-- Re-uploads the ELF before forwarding a DAP restart; failed uploads block restart.
-- Provides **Baker Link: Check Host Connection**, **Baker Link: Open Connection
-  Settings**, a status bar entry, and a **Baker Link Env** output channel.
-- Requires a trusted, non-virtual workspace.
+Install [Baker Link Env from the Marketplace](https://marketplace.visualstudio.com/items?itemName=baker-link-lab.baker-link-env)
+**inside the Dev Container**. The
+[Baker Link template](https://github.com/Baker-link-Lab/bakerlink_tutorial_template)
+installs it automatically.
 
-### Install and try
+Requires VS Code >= 1.116.0 and a trusted, non-virtual workspace.
 
-Requires VS Code >= 1.116.0 and Node >= 22, inherited from upstream.
-
-```sh
-npm ci
-npm test
-npm run package
-```
-
-In the Dev Container window, use **Extensions: Install from VSIX...** and select
-`baker-link-env-0.1.1.vsix`. Verify the extension is installed **in the container**.
-The publisher ID is reserved in the manifest only; Marketplace registration and
-publication are not part of this MVP.
+## Configuration
 
 Configure `.vscode/launch.json` (replace `my-project` with your Cargo binary name):
 
@@ -67,59 +53,36 @@ Configure `.vscode/launch.json` (replace `my-project` with your Cargo binary nam
 }
 ```
 
-Supply a `cargo: build` task, start Baker Link Env with **Run** on the host,
-then press F5. `bakerLink.dapServer` overrides top-level `server` for Baker Link
-artifact sessions. If omitted, `server` is used, then the built-in default
-`host.docker.internal:50001`. `bakerLink.uploadUrl` defaults to
-`http://host.docker.internal:50002`. Explicit invalid endpoints abort debugging.
-Keep `remoteServerMode: false`: the HTTP upload and host-side URI resolver are
-used, not upstream's base64 upload. If `bakerLink` is omitted, an externally
-uploaded artifact can still be used without an automatic upload.
+Add a `cargo: build` task to `.vscode/tasks.json`, start Baker Link Env with
+**Run** on the host, then press **F5**. The template already supplies the task.
 
-### Migrating from 0.1.0
+- Keep `remoteServerMode: false` for `bakerlink://` artifacts.
+- `bakerLink.dapServer` takes priority over `server`; the default is
+  `host.docker.internal:50001`. The upload URL defaults to
+  `http://host.docker.internal:50002`.
+- Relative ELF paths resolve against the workspace folder. For release or example
+  builds, change the build task, ELF path, and artifact URI together.
+- Project/profile identifiers accept 1-80 ASCII letters, digits, `-` or `_`.
+  One ELF is uploaded per session, with SHA-256 verification, a 128 MiB limit,
+  and a 30-second timeout. Upload failures block launch or restart.
 
-Move `dapServer` and `uploadUrl` from `.bakerlink/connection.json` into the
-`bakerLink` object of each debug configuration. Keep `bakerLink.elf` and use
-`"preLaunchTask": "cargo: build"` (or your chosen build task).
-Remove shell-upload tasks referencing `.bakerlink/upload-elf.sh`, then delete
-`.bakerlink`. Version 0.1.1 no longer reads that directory; non-default endpoints
-must be migrated before upgrading. No `jq`, `curl`, or project-local upload
-script is needed. Artifact transfer is implemented by the extension.
+For projects using version 0.1.0, move endpoints from `.bakerlink/connection.json`
+into `bakerLink`, replace shell-upload tasks with build-only tasks, and delete
+`.bakerlink`. The extension no longer reads that directory.
 
-Relative `bakerLink.elf` paths resolve against the selected workspace folder.
-For examples/release, set the appropriate build task, ELF path, and artifact URI.
-Each project/profile identifier accepts 1-80 ASCII letters, digits, `-` or `_`.
-Transfers have a 128 MiB limit and a 30-second timeout and can be cancelled;
-errors abort debugging. Standard non-artifact probe-rs configurations remain
-available under the new debug type, with local executable configuration at
-`bakerLink.debuggerExecutable`.
+## Troubleshooting
 
-**Baker Link: Open Connection Settings** opens the project's `.vscode/launch.json`.
-The connection command selects a workspace and, if needed, a Baker Link debug
-configuration, using that configuration's endpoints. Use literal endpoint strings
-for diagnostics; debug launches can use VS Code-substituted variables.
-The connection command checks TCP reachability only; it does not authenticate
-the host, verify application readiness, or detect USB probes. The status is a
-last-check result, not continuous monitoring. Host services have no authentication:
-restrict them to trusted networks with firewall rules. For Docker, bind to a
-container-reachable host address, not host loopback; Linux needs
-`host.docker.internal:host-gateway`.
+- **Baker Link: Check Host Connection** checks the selected configuration's TCP
+  ports, not USB probe readiness or host identity. Use literal endpoint strings
+  for this check; the status bar shows the last result, not continuous monitoring.
+- **Baker Link: Open Connection Settings** opens `.vscode/launch.json`.
+  Transfer errors appear in the **Baker Link Env** output channel.
+- Start the host services manually and use a container-reachable bind address,
+  not host loopback. Linux Docker requires
+  `host.docker.internal:host-gateway`.
 
-No host control API, automatic host startup, or Marketplace publication is added.
+**Host DAP and upload services are unauthenticated. Use trusted networks and
+firewall rules; do not expose these ports to untrusted networks.**
 
-## Upstream debugger
-
-A VS Code extension for debugging embedded Rust applications using probe-rs, with support for a [large range of debug probes and chips](https://probe.rs/targets/?manufacturer=SHOW_ALL_MANUFACTURERS&family=SHOW_ALL_FAMILIES), including many variants of ARM Cortex-M, ARM Cortex-A, and RISC-V.
-
-## Documentation
-
-Full documentation on [Installation](https://probe.rs/docs/tools/debugger/#installation), [Configuration](https://probe.rs/docs/tools/debugger/#usage-and-configuration) and [supported functionality](https://probe.rs/docs/tools/debugger/#current-working-functionality-and-known-limitations)
-can be found at [the probe-rs webpage](https://probe.rs/docs/tools/debugger/) and
-under the [visual tour
-heading](https://probe.rs/docs/tools/debugger/#a-visual-guide-of-implemented-features)
-
-<img style="margin-top: 1em; margin-bottom: 1em; max-width:100%; max-height:100%; width: auto; height: auto;" src="https://probe.rs/images/probe-rs-debugger.gif" />
-
-## Releasing
-
-Maintainers cut releases via GitHub Releases; the publish workflow runs gated by required approval. See [PUBLISH.md](PUBLISH.md) for the release procedure and how the publishing pipeline is configured.
+See [probe-rs debugger documentation](https://probe.rs/docs/tools/debugger/)
+for chip, probe, and debugger options.
