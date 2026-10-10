@@ -20,3 +20,4 @@ jobs:
           node-version: '22'
       - run: npm ci
       - run: npm run pretest
+      - run: npm test --ignore-scripts

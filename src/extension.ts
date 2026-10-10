@@ -17,6 +17,8 @@ import {
     ProviderResult,
     WorkspaceFolder,
 } from 'vscode';
+import {BakerLinkIntegration, DEBUG_TYPE} from './bakerLinkIntegration';
+import {parseDapAddress} from './bakerLink';
 import {probeRsInstalled} from './utils';
 import {
     ProbeRsDebugAdapter,
@@ -29,31 +31,19 @@ import {
 import {DapTransport, StdioDapTransport, TcpDapTransport} from './transport';
 
 export async function activate(context: vscode.ExtensionContext) {
-    const descriptorFactory = new ProbeRSDebugAdapterServerDescriptorFactory();
-    const configProvider = new ProbeRSConfigurationProvider();
+    const bakerLink = new BakerLinkIntegration(context);
+    const descriptorFactory = new ProbeRSDebugAdapterServerDescriptorFactory(bakerLink);
+    const configProvider = new ProbeRSConfigurationProvider(bakerLink);
     const trackerFactory = new ProbeRsDebugAdapterTrackerFactory();
 
     context.subscriptions.push(
-        vscode.debug.registerDebugAdapterDescriptorFactory('probe-rs-debug', descriptorFactory),
-        vscode.debug.registerDebugConfigurationProvider('probe-rs-debug', configProvider),
-        vscode.debug.registerDebugAdapterTrackerFactory('probe-rs-debug', trackerFactory),
+        vscode.debug.registerDebugAdapterDescriptorFactory(DEBUG_TYPE, descriptorFactory),
+        vscode.debug.registerDebugConfigurationProvider(DEBUG_TYPE, configProvider),
+        vscode.debug.registerDebugAdapterTrackerFactory(DEBUG_TYPE, trackerFactory),
         vscode.debug.onDidReceiveDebugSessionCustomEvent(
             descriptorFactory.receivedCustomEvent.bind(descriptorFactory),
         ),
     );
-
-    (async () => {
-        if (!(await probeRsInstalled())) {
-            const resp = await vscode.window.showInformationMessage(
-                "probe-rs doesn't seem to be installed. Do you want to install it automatically now?",
-                'Install',
-            );
-
-            if (resp === 'Install') {
-                await installProbeRs();
-            }
-        }
-    })();
 }
 
 export function deactivate(context: vscode.ExtensionContext) {
@@ -69,7 +59,7 @@ const enum ConsoleLogSources {
     warn = `WARN`, // Identifies messages that contain warning information.
     info = 'INFO', // Identifies messages that contain summary level of debug information.
     debug = 'DEBUG', // Identifies messages that contain detailed level debug information.
-    console = 'probe-rs-debug', // Identifies messages from the extension or debug adapter that must be sent to the Debug Console.
+    console = 'baker-link-debug', // Identifies messages from the extension or debug adapter that must be sent to the Debug Console.
 }
 
 // This is just the default. It will be updated after the configuration has been resolved.
@@ -142,6 +132,8 @@ function logToConsole(consoleMessage: string, fromDebugger: boolean = false) {
 }
 
 class ProbeRSDebugAdapterServerDescriptorFactory implements vscode.DebugAdapterDescriptorFactory {
+    constructor(private readonly bakerLink: BakerLinkIntegration) {}
+
     rttTerminals: [
         channelNumber: number,
         dataFormat: String,
@@ -245,6 +237,9 @@ class ProbeRSDebugAdapterServerDescriptorFactory implements vscode.DebugAdapterD
     }
 
     receivedCustomEvent(customEvent: vscode.DebugSessionCustomEvent) {
+        if (customEvent.session.type !== DEBUG_TYPE) {
+            return;
+        }
         switch (customEvent.event) {
             case 'probe-rs-rtt-channel-config':
                 this.createRttTerminal(
@@ -323,6 +318,13 @@ class ProbeRSDebugAdapterServerDescriptorFactory implements vscode.DebugAdapterD
         session: vscode.DebugSession,
         executable: vscode.DebugAdapterExecutable | undefined,
     ): Promise<vscode.DebugAdapterDescriptor | null | undefined> {
+        // VS Code completes preLaunchTask before requesting the adapter descriptor.
+        try {
+            await this.bakerLink.prepareDebug(session.configuration, session.workspaceFolder);
+        } catch (error) {
+            this.bakerLink.reportError(error);
+            return undefined;
+        }
         if (session.configuration.hasOwnProperty('consoleLogLevel')) {
             consoleLogLevel = session.configuration.consoleLogLevel.toLowerCase();
         }
@@ -386,7 +388,17 @@ class ProbeRSDebugAdapterServerDescriptorFactory implements vscode.DebugAdapterD
         }
 
         return new vscode.DebugAdapterInlineImplementation(
-            new ProbeRsDebugAdapter(transport, sourceFileMap),
+            new ProbeRsDebugAdapter(transport, sourceFileMap, async () => {
+                try {
+                    await this.bakerLink.prepareDebug(
+                        session.configuration,
+                        session.workspaceFolder,
+                    );
+                } catch (error) {
+                    this.bakerLink.reportError(error);
+                    throw error;
+                }
+            }),
         );
     }
 
@@ -401,9 +413,7 @@ class ProbeRSDebugAdapterServerDescriptorFactory implements vscode.DebugAdapterD
  * Only TCP can reach such a server, because its stdio belongs to whoever launched it.
  */
 function connectToExistingServer(server: string): DapTransport {
-    var parts = new String(server).split(':', 2);
-    var host = parts[0];
-    var port = parts.length > 1 && parts[1].length > 0 ? +parts[1] : defaultServerPort;
+    const {host, port} = parseDapAddress(server, defaultServerPort);
     logToConsole(
         `${ConsoleLogSources.console}: Debug using existing server ${JSON.stringify(
             host,
@@ -433,6 +443,21 @@ async function launchServerOverStdio(
     session: vscode.DebugSession,
     executable: vscode.DebugAdapterExecutable | undefined,
 ): Promise<DapTransport> {
+    if (
+        !executable &&
+        !session.configuration.runtimeExecutable &&
+        !vscode.workspace.getConfiguration('bakerLink').get('debuggerExecutable') &&
+        !(await probeRsInstalled())
+    ) {
+        const response = await vscode.window.showInformationMessage(
+            'Local debugging requires probe-rs. Install it now?',
+            'Install',
+        );
+        if (response === 'Install') {
+            installProbeRs();
+        }
+        throw new Error('Install probe-rs or configure bakerLink.debuggerExecutable, then retry.');
+    }
     var args: string[];
     if (session.configuration.hasOwnProperty('runtimeArgs')) {
         // Copy, so that repeated launches do not accumulate arguments on the configuration.
@@ -678,7 +703,7 @@ function installProbeRs() {
 // This takes the value from configuration, if set, or
 // falls back to the default name.
 function debuggerExecutablePath(): string {
-    let configuration = vscode.workspace.getConfiguration('probe-rs-debugger');
+    let configuration = vscode.workspace.getConfiguration('bakerLink');
 
     let configuredPath: string = configuration.get('debuggerExecutable') || defaultExecutable();
 
@@ -704,6 +729,8 @@ class ProbeRsDebugAdapterTrackerFactory implements DebugAdapterTrackerFactory {
 }
 
 class ProbeRSConfigurationProvider implements DebugConfigurationProvider {
+    constructor(private readonly bakerLink: BakerLinkIntegration) {}
+
     /**
      * Ensure the provided configuration has the essential defaults applied.
      */
@@ -717,7 +744,7 @@ class ProbeRSConfigurationProvider implements DebugConfigurationProvider {
         // if (!config.type && !config.request && !config.name) {
         // const editor = vscode.window.activeTextEditor;
         // if (editor && editor.document.languageId === 'rust') {
-        //     config.type = 'probe-rs-debug';
+        //     config.type = 'baker-link-debug';
         //     config.name = 'Launch';
         //     config.request = 'launch';
         //     ...
@@ -754,6 +781,12 @@ class ProbeRSConfigurationProvider implements DebugConfigurationProvider {
         config: DebugConfiguration,
         token?: CancellationToken,
     ): Promise<DebugConfiguration | undefined> {
+        try {
+            await this.bakerLink.configure(config, folder);
+        } catch (error) {
+            this.bakerLink.reportError(error);
+            return undefined;
+        }
         config.remoteServerMode = resolveRemoteServerMode(config);
         if (config.remoteServerMode) {
             if (typeof config.server === 'string' && isRpcServer(config.server)) {

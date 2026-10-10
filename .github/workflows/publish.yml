@@ -13,6 +13,7 @@ permissions:
 
 jobs:
   publish-vsce:
+    if: vars.BAKER_LINK_PUBLISH_ENABLED == 'true'
     name: Publish to VS Code Marketplace
     runs-on: ubuntu-latest
     environment: marketplace
@@ -34,6 +35,7 @@ jobs:
       - run: npm run publish -- --azure-credential
 
   publish-ovsx:
+    if: vars.BAKER_LINK_PUBLISH_ENABLED == 'true'
     name: Publish to Open VSX
     runs-on: ubuntu-latest
     environment: marketplace

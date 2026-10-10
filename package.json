@@ -1,9 +1,9 @@
 {
-    "name": "probe-rs-debugger",
-    "displayName": "Debugger for probe-rs",
-    "version": "0.32.0",
-    "publisher": "probe-rs",
-    "description": "probe-rs Debug Adapter for VS Code.",
+    "name": "baker-link-env",
+    "displayName": "Baker Link Env",
+    "version": "0.1.0",
+    "publisher": "baker-link-lab",
+    "description": "Embedded debugging and Dev Container integration for Baker Link Env, powered by probe-rs.",
     "author": {
         "name": "Jack Noppé",
         "email": "noppej@hotmail.com"
@@ -31,15 +31,15 @@
         "Debuggers"
     ],
     "sponsor": {
-        "url": "https://github.com/sponsors/probe-rs"
+        "url": "https://www.buymeacoffee.com/Bakerlink.Lab"
     },
-    "homepage": "https://probe.rs/",
+    "homepage": "https://github.com/Baker-link-Lab/baker-link-env-vscode",
     "repository": {
         "type": "git",
-        "url": "https://github.com/probe-rs/vscode.git"
+        "url": "https://github.com/Baker-link-Lab/baker-link-env-vscode.git"
     },
     "bugs": {
-        "url": "https://github.com/probe-rs/vscode/issues"
+        "url": "https://github.com/Baker-link-Lab/baker-link-env-vscode/issues"
     },
     "publishConfig": {
         "registry": "https://marketplace.visualstudio.com/"
@@ -51,9 +51,10 @@
         "vscode:prepublish": "rimraf dist && npm run -S build -- --minify",
         "publish": "vsce publish --no-yarn --skip-duplicate",
         "un-publish": "vsce unpublish",
-        "login": "vsce login probe-rs",
+        "login": "vsce login baker-link-lab",
         "run-prettier": "prettier --write .",
         "pretest": "npm run compile && npm run lint && npm run typecheck && prettier --check .",
+        "test": "tsc -p tsconfig.test.json --noEmit && esbuild test/bakerLink.test.ts --bundle --platform=node --format=cjs --alias:vscode=./test/vscode.ts --outfile=out/bakerLink.test.cjs && node --test out/bakerLink.test.cjs",
         "compile": "tsc -p ./",
         "lint": "eslint \"src/**/*.ts\"",
         "typecheck": "tsc -p tsconfig.json --noEmit",
@@ -82,14 +83,33 @@
         "webpack-cli": "^7.0.2"
     },
     "main": "./dist/extension.js",
+    "extensionKind": [
+        "workspace"
+    ],
     "activationEvents": [
         "onDebug",
-        "onStartupFinished"
+        "workspaceContains:.bakerlink/connection.json"
     ],
-    "workspaceTrust": {
-        "request": "never"
+    "capabilities": {
+        "untrustedWorkspaces": {
+            "supported": false,
+            "description": "Baker Link reads build artifacts and connects to host services only in trusted workspaces."
+        },
+        "virtualWorkspaces": {
+            "supported": false
+        }
     },
     "contributes": {
+        "commands": [
+            {
+                "command": "bakerLink.checkConnection",
+                "title": "Baker Link: Check Host Connection"
+            },
+            {
+                "command": "bakerLink.openConnection",
+                "title": "Baker Link: Open Connection Settings"
+            }
+        ],
         "breakpoints": [
             {
                 "language": "rust"
@@ -106,8 +126,8 @@
         ],
         "debuggers": [
             {
-                "type": "probe-rs-debug",
-                "label": "probe-rs Debugger",
+                "type": "baker-link-debug",
+                "label": "Baker Link Env (probe-rs)",
                 "languages": [
                     "rust",
                     "c"
@@ -119,6 +139,19 @@
                             "coreConfigs"
                         ],
                         "properties": {
+                            "bakerLink": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "required": [
+                                    "elf"
+                                ],
+                                "properties": {
+                                    "elf": {
+                                        "type": "string",
+                                        "description": "Container-side ELF file to upload after preLaunchTask completes. Requires one bakerlink://project/profile programBinary. Supports VS Code variables."
+                                    }
+                                }
+                            },
                             "server": {
                                 "type": "string",
                                 "description": "Where the session gets its probes. Omit to launch a local `probe-rs dap-server` and talk to it over stdin/stdout.\n\nAn IP and Port, e.g. '127.0.0.1:50000', connects to an existing `probe-rs dap-server` over TCP.\n\nA URL, e.g. 'ws://192.168.0.10:3000' or 'ssh://user@host', keeps the dap-server local but drives the probes of a remote `probe-rs serve` over RPC. Authenticate with `token`. **Experimental**, and requires a `probe-rs` built with the `remote` feature.",
@@ -625,12 +658,16 @@
                 },
                 "initialConfigurations": [
                     {
-                        "type": "probe-rs-debug",
+                        "type": "baker-link-debug",
                         "request": "launch",
-                        "name": "probe-rs Test",
+                        "name": "Baker Link: Debug",
                         "cwd": "${workspaceFolder}",
-                        "connectUnderReset": true,
-                        "chip": "STM32H745ZITx",
+                        "preLaunchTask": "cargo: build",
+                        "remoteServerMode": false,
+                        "chip": "RP2040",
+                        "bakerLink": {
+                            "elf": "${workspaceFolder}/target/thumbv6m-none-eabi/debug/${workspaceFolderBasename}"
+                        },
                         "flashingConfig": {
                             "flashingEnabled": true,
                             "verifyBeforeFlashing": true,
@@ -640,22 +677,26 @@
                         "coreConfigs": [
                             {
                                 "coreIndex": 0,
-                                "programBinary": "./target/thumbv7em-none-eabihf/debug/${workspaceFolderBasename}"
+                                "programBinary": "bakerlink://${workspaceFolderBasename}/debug"
                             }
                         ]
                     }
                 ],
                 "configurationSnippets": [
                     {
-                        "label": "probe-rs Debug: Launch",
-                        "description": "A new configuration for embedded debugging of a user selected rust file with probe-rs.",
+                        "label": "Baker Link Debug: Launch",
+                        "description": "Build and upload an RP2040 ELF to Baker Link Env before debugging.",
                         "body": {
-                            "type": "probe-rs-debug",
+                            "type": "baker-link-debug",
                             "request": "launch",
-                            "name": "probe-rs Test",
+                            "name": "Baker Link: Debug",
                             "cwd": "${workspaceFolder}",
-                            "connectUnderReset": false,
-                            "chip": "STM32H745ZITx",
+                            "preLaunchTask": "cargo: build",
+                            "remoteServerMode": false,
+                            "chip": "RP2040",
+                            "bakerLink": {
+                                "elf": "${workspaceFolder}/target/thumbv6m-none-eabi/debug/${workspaceFolderBasename}"
+                            },
                             "flashingConfig": {
                                 "flashingEnabled": true,
                                 "verifyBeforeFlashing": true,
@@ -665,7 +706,7 @@
                             "coreConfigs": [
                                 {
                                     "coreIndex": 0,
-                                    "programBinary": "./target/thumbv7em-none-eabihf/debug/${workspaceFolderBasename}"
+                                    "programBinary": "bakerlink://${workspaceFolderBasename}/debug"
                                 }
                             ]
                         }
@@ -675,12 +716,18 @@
         ],
         "configuration": [
             {
-                "title": "probe-rs Debugger",
+                "title": "Baker Link Env",
                 "properties": {
-                    "probe-rs-debugger.debuggerExecutable": {
+                    "bakerLink.debuggerExecutable": {
                         "type": "string",
                         "markdownDescription": "Path to the `probe-rs` executable. If this is not set, the extension requires that `probe-rs` (or `probe-rs.exe`) is available on the system `PATH`.\n\nNote: Setting `runtimeExecutable` in 'launch.json' take precedence over this setting.",
                         "scope": "machine-overridable"
+                    },
+                    "bakerLink.dapServer": {
+                        "type": "string",
+                        "default": "host.docker.internal:50001",
+                        "description": "Legacy launch.json substitution. Baker Link artifact sessions use .bakerlink/connection.json as the source of truth.",
+                        "scope": "resource"
                     }
                 }
             }

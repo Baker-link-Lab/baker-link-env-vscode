@@ -1,4 +1,15 @@
-# Publishing the probe-rs VS Code Extension
+# Publishing the Baker Link Env VS Code Extension
+
+The development MVP is distributed as a local VSIX via `npm run package`.
+Marketplace publication is disabled unless the repository variable
+`BAKER_LINK_PUBLISH_ENABLED` is explicitly set to `true`. Before enabling it,
+register the `baker-link-lab` publisher and configure credentials/environments
+for `Baker-link-Lab/baker-link-env-vscode` in both registries as needed.
+Do not reuse upstream's publisher identity or credentials.
+
+The remainder is upstream reference documentation. Its `probe-rs` publisher,
+repository links, tenant, and identity examples must be replaced for this fork;
+they are not configured Baker Link release infrastructure.
 
 How the extension is published to the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=probe-rs.probe-rs-debugger) and [Open VSX Registry](https://open-vsx.org/extension/probe-rs/probe-rs-debugger), how to cut a release, and how to recover or recreate the pipeline if anything in the identity setup breaks.
 

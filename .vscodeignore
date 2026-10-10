@@ -1,11 +1,13 @@
 .vscode
 .gitignore
 src/
+test/
 out/
 **/*.js.map
 build
 node_modules
 tsconfig.json
+tsconfig.test.json
 *.vsix
 dap/
 .eslintrc.json

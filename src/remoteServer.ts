@@ -31,6 +31,8 @@ import {promises as fs, existsSync} from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
+import type {DebugProtocol} from '@vscode/debugprotocol';
+import {errorMessage} from './bakerLink';
 import {DapTransport} from './transport';
 
 /**
@@ -365,6 +367,7 @@ export class ProbeRsDebugAdapter implements vscode.DebugAdapter {
     constructor(
         private readonly transport: DapTransport,
         private readonly sourceFileMap: SourceFileMap,
+        private readonly beforeRestart?: () => Promise<void>,
     ) {
         this.transport.start({
             onData: (chunk: Buffer) => {
@@ -382,6 +385,42 @@ export class ProbeRsDebugAdapter implements vscode.DebugAdapter {
     }
 
     handleMessage(message: vscode.DebugProtocolMessage): void {
+        if (
+            'type' in message &&
+            message.type === 'request' &&
+            'command' in message &&
+            message.command === 'restart' &&
+            'seq' in message &&
+            typeof message.seq === 'number' &&
+            this.beforeRestart
+        ) {
+            const requestSeq = message.seq;
+            void this.beforeRestart().then(
+                () => {
+                    if (!this.disposed) {
+                        this.writeMessage(message);
+                    }
+                },
+                (error: unknown) => {
+                    if (!this.disposed) {
+                        const response: DebugProtocol.Response = {
+                            type: 'response',
+                            seq: 0,
+                            ['request_seq']: requestSeq,
+                            command: 'restart',
+                            success: false,
+                            message: errorMessage(error),
+                        };
+                        this._onDidSendMessage.fire(response);
+                    }
+                },
+            );
+            return;
+        }
+        this.writeMessage(message);
+    }
+
+    private writeMessage(message: vscode.DebugProtocolMessage): void {
         var json = JSON.stringify(message);
         var encoded = Buffer.byteLength(json, 'utf8');
         this.transport.write(Buffer.from(`Content-Length: ${encoded}\r\n\r\n${json}`, 'utf8'));

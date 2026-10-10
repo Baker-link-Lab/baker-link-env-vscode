@@ -24,5 +24,6 @@
         "strictNullChecks": true,
         "noUnusedParameters": false
     },
+    "include": ["src/**/*.ts"],
     "exclude": ["node_modules"]
 }
