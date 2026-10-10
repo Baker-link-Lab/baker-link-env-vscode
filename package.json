@@ -26,7 +26,7 @@
         "vscode": ">=1.116.0",
         "node": ">=22.0.0"
     },
-    "icon": "images/probe-rs-debugger.png",
+    "icon": "icon/icon.png",
     "categories": [
         "Debuggers"
     ],

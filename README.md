@@ -3,6 +3,9 @@
 A Baker Link fork of the [probe-rs VS Code extension](https://github.com/probe-rs/vscode),
 based on upstream 0.32.0. This is not the official probe-rs extension.
 
+The extension icon is bundled from `icon/icon.png`, copied from Baker Link Env's
+`icon/icon.png`. It does not depend on files outside this repository.
+
 ## Development MVP
 
 - Extension ID: `baker-link-lab.baker-link-env`.
