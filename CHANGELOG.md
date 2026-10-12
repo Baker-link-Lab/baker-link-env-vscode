@@ -1,4 +1,25 @@
-## Since version 0.20, this CHANGELOG is no longer maintained. 
+# Baker Link Env changelog
+
+## 0.2.0 - 2026-10-12
+
+- Add Copilot Agent tools for project discovery, configured Cargo tasks,
+  binary/example/test artifact builds, and host test execution.
+- Add launch, launchWithArtifact, and direct hardware debugging modes.
+  Existing launch mode preserves preLaunchTask; artifact modes skip it without
+  changing launch.json or tasks.json.
+- Add source breakpoint creation, listing, and targeted removal.
+- Return tool results as JSON text so Agents can read them without attachments.
+- Read freshly saved JSONC launch configurations and validate workspace,
+  artifact identity, ELF contents, and changed build outputs.
+- Respect Cargo target defaults, linker flags, and environment configuration.
+
+RTT/Debug Console log retrieval and embedded test pass/fail collection are not
+included. Debug session status does not prove breakpoint arrival or ADC results.
+
+## Upstream history (probe-rs extension)
+
+The versions below refer to the upstream probe-rs extension, not Baker Link Env.
+The upstream changelog stopped being maintained after version 0.20.
 - Please refer to the [probe-rs CHANGELOG](https://github.com/probe-rs/probe-rs/blob/master/CHANGELOG.md) for detailed information on changes that affect functionality in this extension.
 
 ## 0.19.1 Support the new binary names for probe-rs 0.19.0

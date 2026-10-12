@@ -18,6 +18,7 @@ import {
     WorkspaceFolder,
 } from 'vscode';
 import {BakerLinkIntegration, DEBUG_TYPE} from './bakerLinkIntegration';
+import {registerAgentTools} from './agentTools';
 import {parseDapAddress} from './bakerLink';
 import {probeRsInstalled} from './utils';
 import {
@@ -31,6 +32,7 @@ import {
 import {DapTransport, StdioDapTransport, TcpDapTransport} from './transport';
 
 export async function activate(context: vscode.ExtensionContext) {
+    registerAgentTools(context);
     const bakerLink = new BakerLinkIntegration(context);
     const descriptorFactory = new ProbeRSDebugAdapterServerDescriptorFactory(bakerLink);
     const configProvider = new ProbeRSConfigurationProvider(bakerLink);

@@ -1,5 +1,26 @@
 # Publishing the Baker Link Env VS Code Extension
 
+## Baker Link Env release checklist
+
+Release only this extension repository. Its version is independent of the
+desktop app and upstream probe-rs extension.
+
+1. Set the same extension version in package.json and both root version fields
+   in package-lock.json. Update CHANGELOG.md.
+2. Run npm ci, npm test, and npm run package.
+3. Verify the VSIX manifest version and extension/package.json match.
+4. Commit the release and tag the exact commit as vX.Y.Z (for example v0.2.0).
+5. Create the GitHub Release in Baker-link-Lab/baker-link-env-vscode and attach
+   baker-link-env-X.Y.Z.vsix.
+6. Publish that exact VSIX to the baker-link-lab Marketplace publisher using
+   an authorized credential, or the configured Marketplace workflow.
+7. Verify GitHub asset and Marketplace versions separately. A GitHub Release
+   alone does not establish Marketplace publication.
+
+Do not change the launch.json schema version when bumping the extension version.
+Local publication requires Marketplace authentication; never store its token
+in the repository or release notes.
+
 The development MVP is distributed as a local VSIX via `npm run package`.
 Marketplace publication is disabled unless the repository variable
 `BAKER_LINK_PUBLISH_ENABLED` is explicitly set to `true`. Before enabling it,

@@ -1,7 +1,7 @@
 {
     "name": "baker-link-env",
     "displayName": "Baker Link Env",
-    "version": "0.1.1",
+    "version": "0.2.0",
     "publisher": "baker-link-lab",
     "description": "Embedded debugging and Dev Container integration for Baker Link Env, powered by probe-rs.",
     "author": {
@@ -82,6 +82,9 @@
         "webpack": "^5.106.2",
         "webpack-cli": "^7.0.2"
     },
+    "dependencies": {
+        "jsonc-parser": "^3.3.1"
+    },
     "main": "./dist/extension.js",
     "extensionKind": [
         "workspace"
@@ -108,6 +111,362 @@
             {
                 "command": "bakerLink.openConnection",
                 "title": "Baker Link: Open Connection Settings"
+            }
+        ],
+        "languageModelTools": [
+            {
+                "name": "baker-link-env_inspect_project",
+                "toolReferenceName": "bakerInspectProject",
+                "displayName": "Baker Link: Inspect Project",
+                "userDescription": "List Cargo packages, targets, and current Baker Link launch configurations.",
+                "modelDescription": "Use Cargo metadata to discover packages, binary/example/test targets and read saved JSONC launch configurations. Use before selecting a target or configuration. Does not build or connect to hardware.",
+                "canBeReferencedInPrompt": true,
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "workspaceFolder": {
+                            "type": "string",
+                            "description": "Open workspace folder name or absolute path."
+                        }
+                    },
+                    "additionalProperties": false
+                }
+            },
+            {
+                "name": "baker-link-env_build_artifact",
+                "toolReferenceName": "bakerBuildArtifact",
+                "displayName": "Baker Link: Build Artifact",
+                "userDescription": "Build a Cargo binary, example, or test executable without editing settings.",
+                "modelDescription": "Build the selected Cargo target using structured arguments. Read executable paths from Cargo JSON output, not guesses. Returns success and artifact.artifactId for debug launch, or compiler diagnostics on failure. bin/example use cargo build; test/lib use cargo test --no-run. Omitted targetTriple respects Cargo configuration. No arbitrary shell commands.",
+                "canBeReferencedInPrompt": true,
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "workspaceFolder": {
+                            "type": "string"
+                        },
+                        "package": {
+                            "type": "string",
+                            "description": "Exact Cargo package name. Specify when targets are ambiguous."
+                        },
+                        "kind": {
+                            "type": "string",
+                            "enum": [
+                                "bin",
+                                "example",
+                                "test",
+                                "lib"
+                            ]
+                        },
+                        "name": {
+                            "type": "string",
+                            "description": "Exact target name; required except for lib."
+                        },
+                        "profile": {
+                            "type": "string",
+                            "enum": [
+                                "debug",
+                                "release"
+                            ]
+                        },
+                        "features": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        },
+                        "noDefaultFeatures": {
+                            "type": "boolean"
+                        },
+                        "targetTriple": {
+                            "type": "string",
+                            "description": "Optional explicit target triple; omitted means Cargo configured default."
+                        }
+                    },
+                    "required": [
+                        "kind"
+                    ],
+                    "additionalProperties": false
+                }
+            },
+            {
+                "name": "baker-link-env_run_tests",
+                "toolReferenceName": "bakerRunTests",
+                "displayName": "Baker Link: Run or Build Tests",
+                "userDescription": "Execute host tests or build embedded test executables.",
+                "modelDescription": "host mode executes tests only for Cargo's exact host triple, which must be explicitly provided. embedded-build compiles a test/lib harness using --no-run and returns artifact.artifactId; it does not execute hardware tests or claim pass/fail. Specify kind test for integration tests, lib for library unit tests, or bin for host binary unit tests.",
+                "canBeReferencedInPrompt": true,
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "workspaceFolder": {
+                            "type": "string"
+                        },
+                        "mode": {
+                            "type": "string",
+                            "enum": [
+                                "host",
+                                "embedded-build"
+                            ]
+                        },
+                        "package": {
+                            "type": "string"
+                        },
+                        "kind": {
+                            "type": "string",
+                            "enum": [
+                                "test",
+                                "lib",
+                                "bin"
+                            ]
+                        },
+                        "name": {
+                            "type": "string",
+                            "description": "Exact target name; required except for lib."
+                        },
+                        "profile": {
+                            "type": "string",
+                            "enum": [
+                                "debug",
+                                "release"
+                            ]
+                        },
+                        "features": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        },
+                        "noDefaultFeatures": {
+                            "type": "boolean"
+                        },
+                        "targetTriple": {
+                            "type": "string",
+                            "description": "Required for host mode. Must equal Cargo's host triple."
+                        },
+                        "testFilter": {
+                            "type": "string",
+                            "description": "Optional host test name filter. Not allowed for embedded-build."
+                        }
+                    },
+                    "required": [
+                        "mode",
+                        "kind"
+                    ],
+                    "additionalProperties": false
+                }
+            },
+            {
+                "name": "baker-link-env_build",
+                "toolReferenceName": "bakerBuild",
+                "displayName": "Baker Link: Build",
+                "userDescription": "Run an approved Cargo build task in the selected workspace.",
+                "modelDescription": "Run only one of the workspace's configured Cargo tasks: debug build, release build, or cargo check. Never runs an arbitrary command. The configured task may execute project build scripts.",
+                "canBeReferencedInPrompt": true,
+                "icon": "$(tools)",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "mode": {
+                            "type": "string",
+                            "enum": [
+                                "debug",
+                                "release",
+                                "check"
+                            ],
+                            "description": "Selects cargo: build, cargo: build (release), or cargo: check."
+                        },
+                        "workspaceFolder": {
+                            "type": "string",
+                            "description": "Optional open workspace folder name or absolute path. Required for multi-root workspaces."
+                        }
+                    },
+                    "required": [
+                        "mode"
+                    ],
+                    "additionalProperties": false
+                }
+            },
+            {
+                "name": "baker-link-env_start_debugging",
+                "toolReferenceName": "bakerStartDebugging",
+                "displayName": "Baker Link: Start Debugging",
+                "userDescription": "Start an existing Baker Link debug configuration.",
+                "modelDescription": "Start hardware debugging in one of three modes: launch (default) preserves a named launch configuration and its preLaunchTask; launchWithArtifact clones that configuration but substitutes the built artifact and skips preLaunchTask; direct builds a launch configuration from artifactId and explicit chip/dapServer/uploadUrl. Never edits launch.json. Use artifact.artifactId returned by Build Artifact or embedded-build. Hardware execution does not establish embedded test pass/fail. Requires user confirmation and connected VS Code client.",
+                "canBeReferencedInPrompt": true,
+                "icon": "$(debug-start)",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "mode": {
+                            "type": "string",
+                            "enum": [
+                                "launch",
+                                "launchWithArtifact",
+                                "direct"
+                            ],
+                            "description": "Defaults to launch. Select launchWithArtifact to debug an example using existing hardware settings."
+                        },
+                        "artifactId": {
+                            "type": "string",
+                            "description": "Build Artifact result artifact.artifactId; required for launchWithArtifact and direct."
+                        },
+                        "chip": {
+                            "type": "string",
+                            "description": "Required in direct mode only."
+                        },
+                        "dapServer": {
+                            "type": "string",
+                            "description": "Required literal host:port in direct mode only."
+                        },
+                        "uploadUrl": {
+                            "type": "string",
+                            "description": "Required HTTP(S) origin in direct mode only."
+                        },
+                        "flash": {
+                            "type": "boolean",
+                            "description": "Direct mode only; defaults to true."
+                        },
+                        "haltAfterReset": {
+                            "type": "boolean",
+                            "description": "Direct mode only; defaults to true."
+                        },
+                        "rttEnabled": {
+                            "type": "boolean",
+                            "description": "Direct mode only; defaults to true."
+                        },
+                        "configuration": {
+                            "type": "string",
+                            "description": "Name of an existing Baker Link launch configuration. May be omitted only when exactly one exists."
+                        },
+                        "workspaceFolder": {
+                            "type": "string",
+                            "description": "Optional open workspace folder name or absolute path. Required for multi-root workspaces."
+                        }
+                    },
+                    "additionalProperties": false
+                }
+            },
+            {
+                "name": "baker-link-env_debug_status",
+                "toolReferenceName": "bakerDebugStatus",
+                "displayName": "Baker Link: Debug Status",
+                "userDescription": "Check whether a Baker Link debug session is active.",
+                "modelDescription": "Report whether a Baker Link debug session is active in the selected open workspace and return its session and configuration names. Does not start or stop debugging.",
+                "canBeReferencedInPrompt": true,
+                "icon": "$(debug)",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "workspaceFolder": {
+                            "type": "string",
+                            "description": "Optional open workspace folder name or absolute path. Required for multi-root workspaces."
+                        }
+                    },
+                    "additionalProperties": false
+                }
+            },
+            {
+                "name": "baker-link-env_stop_debugging",
+                "toolReferenceName": "bakerStopDebugging",
+                "displayName": "Baker Link: Stop Debugging",
+                "userDescription": "Stop the Baker Link debug session in the selected workspace.",
+                "modelDescription": "Stop only an active Baker Link debug session in the selected workspace. Does not stop unrelated debugger sessions and requires user confirmation.",
+                "canBeReferencedInPrompt": true,
+                "icon": "$(debug-stop)",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "workspaceFolder": {
+                            "type": "string",
+                            "description": "Optional open workspace folder name or absolute path. Required for multi-root workspaces."
+                        }
+                    },
+                    "additionalProperties": false
+                }
+            },
+            {
+                "name": "baker-link-env_set_breakpoint",
+                "toolReferenceName": "bakerSetBreakpoint",
+                "displayName": "Baker Link: Set Breakpoint",
+                "userDescription": "Set a source breakpoint inside the selected workspace.",
+                "modelDescription": "Set a normal source-line breakpoint in an existing Rust, C, C++, or Assembly source file inside the selected workspace. The path may be workspace-relative or absolute but must resolve inside the workspace. Line numbers are one-based. Duplicate breakpoints are not added. Requires user confirmation.",
+                "canBeReferencedInPrompt": true,
+                "icon": "$(debug-breakpoint)",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "path": {
+                            "type": "string",
+                            "description": "Workspace-relative or absolute path to an existing source file."
+                        },
+                        "line": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "description": "One-based source line number."
+                        },
+                        "workspaceFolder": {
+                            "type": "string",
+                            "description": "Optional open workspace folder name or absolute path. Required for multi-root workspaces."
+                        }
+                    },
+                    "required": [
+                        "path",
+                        "line"
+                    ],
+                    "additionalProperties": false
+                }
+            },
+            {
+                "name": "baker-link-env_list_breakpoints",
+                "toolReferenceName": "bakerListBreakpoints",
+                "displayName": "Baker Link: List Breakpoints",
+                "userDescription": "List source breakpoints inside the selected workspace.",
+                "modelDescription": "List normal source-line breakpoints whose source files are inside the selected workspace, including their one-based lines, enabled state, and conditions. Does not modify breakpoints.",
+                "canBeReferencedInPrompt": true,
+                "icon": "$(list-unordered)",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "workspaceFolder": {
+                            "type": "string",
+                            "description": "Optional open workspace folder name or absolute path. Required for multi-root workspaces."
+                        }
+                    },
+                    "additionalProperties": false
+                }
+            },
+            {
+                "name": "baker-link-env_remove_breakpoint",
+                "toolReferenceName": "bakerRemoveBreakpoint",
+                "displayName": "Baker Link: Remove Breakpoint",
+                "userDescription": "Remove a source breakpoint at a specific workspace file and line.",
+                "modelDescription": "Remove source breakpoints at the exact workspace file and one-based line. Does not clear other breakpoints. Requires user confirmation.",
+                "canBeReferencedInPrompt": true,
+                "icon": "$(debug-breakpoint)",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "path": {
+                            "type": "string",
+                            "description": "Workspace-relative or absolute path to an existing source file."
+                        },
+                        "line": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "description": "One-based source line number."
+                        },
+                        "workspaceFolder": {
+                            "type": "string",
+                            "description": "Optional open workspace folder name or absolute path. Required for multi-root workspaces."
+                        }
+                    },
+                    "required": [
+                        "path",
+                        "line"
+                    ],
+                    "additionalProperties": false
+                }
             }
         ],
         "breakpoints": [
