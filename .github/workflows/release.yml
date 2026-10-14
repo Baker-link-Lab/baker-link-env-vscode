@@ -1,0 +1,41 @@
+name: Build Release VSIX
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    name: Build and attach VSIX
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.release.tag_name }}
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Verify release version
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          node -e 'const version = require("./package.json").version; if (process.env.RELEASE_TAG !== `v${version}`) { throw new Error(`Release tag must be v${version}`); }'
+      - run: npm ci
+      - run: npm test
+      - name: Package release VSIX
+        run: npm run package -- --out baker-link-env.vsix
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: baker-link-env-vsix
+          path: baker-link-env.vsix
+          if-no-files-found: error
+      - name: Attach VSIX to GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: gh release upload "$RELEASE_TAG" baker-link-env.vsix --clobber
